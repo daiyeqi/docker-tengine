@@ -1,4 +1,4 @@
-name: Docker image CI
+name: build
 
 on:
   push:
@@ -12,13 +12,14 @@ env:
 
 jobs:
   build:
-    name: Build image
+    name: ${{ matrix.os }}-linux
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        os:
-          - name: debian
+        os: [debian, alpine]
+        include:
+          - os: debian
             flavor: true
             metadata-tag: |
               type=raw,value=bookworm
@@ -30,8 +31,7 @@ jobs:
               type=match,pattern=v(\d),group=1
               type=match,pattern=v(\d.\d),group=1
               type=match,pattern=v(\d.\d.\d),group=1
-
-          - name: alpine
+          - os: alpine
             flavor: false
             metadata-tag: |
               type=raw,value=alpine
@@ -76,8 +76,8 @@ jobs:
             ${{ env.IMAGE_NAME }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
-            latest=${{ matrix.os.flavor }}
-          tags: ${{ matrix.os.metadata-tag }}
+            latest=${{ matrix.flavor }}
+          tags: ${{ matrix.metadata-tag }}
 
       - name: Build and Push Image
         uses: docker/build-push-action@v5
@@ -85,5 +85,5 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
-          file: Dockerfile.${{ matrix.os.name }}
+          file: ${{ matrix.os }}/Dockerfile
           push: true

@@ -8,23 +8,22 @@ RUN set -x \
     && addgroup -g 101 -S nginx \
     && adduser -S -D -H -u 101 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx \
     && apkArch="$(cat /etc/apk/arch)" \
-    && apk add --no-cache --virtual .build-deps \
-        curl gcc libc-dev make pcre2-dev perl zlib-dev linux-headers bash \
-    && apk add --no-cache pcre2 zlib ca-certificates \
-    && export TEMP_HOME="$(mktemp -d)" && cd $TEMP_HOME \
-    && curl -L -o $TEMP_HOME/tongsuo.tar.gz https://github.com/Tongsuo-Project/Tongsuo/archive/refs/tags/$TONGSUO_VERSION.tar.gz && tar -zxf tongsuo.tar.gz \
-    && cd $TEMP_HOME/Tongsuo-$TONGSUO_VERSION/ \
     && case "$apkArch" in \
          x86_64) \
-           export TONGSUO_LD_LIBRARY_PATH=/usr/local/tongsuo/lib64 \
+           tongsuo_opt="-march=native no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-ec_sm2p_64_gcc_128 enable-cert-compression enable-ntls --api=1.1.1"; \
            ;; \
          aarch64) \
-           export TONGSUO_LD_LIBRARY_PATH=/usr/local/tongsuo/lib \
+           tongsuo_opt="no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-ec_sm2p_64_gcc_128 enable-cert-compression enable-ntls --api=1.1.1"; \
+           ;; \
+         armv7) \
+           tongsuo_opt="no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-cert-compression enable-ntls --api=1.1.1"; \
            ;; \
        esac \
-    && ./config --prefix=/usr/local/tongsuo \
-        -Wl,-rpath,$TONGSUO_LD_LIBRARY_PATH enable-ntls && make -j4 && make install \
-    && rm -rf $TEMP_HOME && export TEMP_HOME="$(mktemp -d)" && cd $TEMP_HOME \
+    && apk add --no-cache --virtual .build-deps \
+            curl gcc libc-dev make pcre2-dev perl zlib-dev linux-headers bash \
+    && apk add --no-cache pcre2 zlib ca-certificates \
+    && export TEMP_HOME="$(mktemp -d)" && cd $TEMP_HOME \
+    && curl -L -o $TEMP_HOME/tongsuo.tar.gz https://github.com/Tongsuo-Project/Tongsuo/archive/refs/tags/$TONGSUO_VERSION.tar.gz && tar -zxf tongsuo.tar.gz \ 
     && curl -L -o $TEMP_HOME/tengine.tar.gz https://github.com/alibaba/tengine/archive/refs/tags/$TENGINE_VERSION.tar.gz && tar -zxf tengine.tar.gz \
     && cd $TEMP_HOME/tengine-$TENGINE_VERSION/ \
     && mkdir /var/lib/nginx && chown nginx:nginx /var/lib/nginx \
@@ -60,15 +59,16 @@ RUN set -x \
         --with-http_random_index_module \
         --with-http_secure_link_module \
         --with-http_sub_module \
+        --with-stream_realip_module \
         --with-stream_ssl_module \
         --with-stream_sni \
         --with-stream_ssl_preread_module \
         --with-stream_realip_module \
         --with-stream=dynamic \
-        --add-module=modules/ngx_tongsuo_ntls \
-        --with-openssl-opt="--strict-warnings --api=1.1.1 enable-ntls" \
-        --with-cc-opt="-I/usr/local/tongsuo/include" \
-        --with-ld-opt="-Wl,-rpath,$TONGSUO_LD_LIBRARY_PATH,-L$TONGSUO_LD_LIBRARY_PATH" && make -j4 && make install \
+        --add-module=./modules/ngx_tongsuo_ntls \
+        --with-openssl=$TEMP_HOME/Tongsuo-$TONGSUO_VERSION \
+        --with-openssl-opt="$tongsuo_opt" \
+    && make -j4 && make install \
     && rm -rf $TEMP_HOME \
     && apk del --no-network .build-deps && rm -rf /var/cache/apk/* \
     && echo "Container for $(uname -m) CPU architecture." > /opt/architecture \
