@@ -1,32 +1,36 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 LABEL maintainer="Dai Yeqi <daiyeqi@nichijou.com>"
 
-ENV TONGSUO_VERSION 8.4.0
-ENV TENGINE_VERSION 3.1.0
+ARG TONGSUO_VERSION=8.5.0-pre1
+ARG TENGINE_VERSION=3.1.0
 
-RUN set -x \
+COPY patches/0001-tengine-3.1.0-fix-unterminated-string-initialization.patch /tmp/patches/
+
+RUN set -eux \
     && groupadd --system --gid 101 nginx \
-    && useradd --system --gid nginx --no-create-home --home /nonexistent --comment "nginx user" --shell /bin/false --uid 101 nginx \
+    && useradd --system --gid nginx --no-create-home --home-dir /nonexistent --comment "nginx user" --shell /usr/sbin/nologin --uid 101 nginx \
     && dpkgArch="$(dpkg --print-architecture)" \
     && case "$dpkgArch" in \
          amd64) \
-           tongsuo_opt="-march=native no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-ec_sm2p_64_gcc_128 enable-cert-compression enable-ntls --api=1.1.1"; \
+           tongsuo_opt="-march=native no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-ec_sm2p_64_gcc_128 enable-zlib enable-ntls --api=1.1.1"; \
            ;; \
          arm64) \
-           tongsuo_opt="no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-ec_sm2p_64_gcc_128 enable-cert-compression enable-ntls --api=1.1.1"; \
+           tongsuo_opt="no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-ec_sm2p_64_gcc_128 enable-zlib enable-ntls --api=1.1.1"; \
            ;; \
          armhf) \
-           tongsuo_opt="linux-armv4 no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-cert-compression enable-ntls --api=1.1.1"; \
+           tongsuo_opt="linux-armv4 no-rc5 no-zlib no-ssl3 no-ssl3-method enable-cms no-capieng no-rdrand enable-zlib enable-ntls --api=1.1.1"; \
            ;; \
        esac \
     && apt-get update \
     && apt-get install --no-install-recommends --no-install-suggests -y \
-        curl ca-certificates lsb-release g++ gcc make libpcre2-8-0 libpcre2-dev zlib1g zlib1g-dev perl \
-    && export TEMP_HOME="$(mktemp -d)" && cd $TEMP_HOME \
-    && curl -L -o $TEMP_HOME/tongsuo.tar.gz https://github.com/Tongsuo-Project/Tongsuo/archive/refs/tags/$TONGSUO_VERSION.tar.gz && tar -zxf tongsuo.tar.gz \
-    && curl -L -o $TEMP_HOME/tengine.tar.gz https://github.com/alibaba/tengine/archive/refs/tags/$TENGINE_VERSION.tar.gz && tar -zxf tengine.tar.gz \
-    && cd $TEMP_HOME/tengine-$TENGINE_VERSION/ \
-    && mkdir /var/lib/nginx && chown nginx:nginx /var/lib/nginx \
+        curl ca-certificates g++ gcc make libpcre2-8-0 libpcre2-dev zlib1g zlib1g-dev patch perl \
+    && export TEMP_HOME="$(mktemp -d)" && cd "$TEMP_HOME" \
+    && curl -L -o "$TEMP_HOME/tongsuo.tar.gz" https://github.com/Tongsuo-Project/Tongsuo/archive/refs/tags/$TONGSUO_VERSION.tar.gz && tar -zxf "$TEMP_HOME/tongsuo.tar.gz" \
+    && curl -L -o "$TEMP_HOME/tengine.tar.gz" https://github.com/alibaba/tengine/archive/refs/tags/$TENGINE_VERSION.tar.gz && tar -zxf "$TEMP_HOME/tengine.tar.gz" \
+    && cd "$TEMP_HOME/tengine-$TENGINE_VERSION/" \
+    && patch --dry-run -p1 < /tmp/patches/0001-tengine-3.1.0-fix-unterminated-string-initialization.patch \
+    && patch -p1 < /tmp/patches/0001-tengine-3.1.0-fix-unterminated-string-initialization.patch \
+    && mkdir -p /var/log/nginx /var/lib/nginx /run && chown nginx:nginx /var/lib/nginx \
     && ./configure \
         --prefix=/etc/nginx \
         --sbin-path=/usr/sbin/nginx \
@@ -41,8 +45,8 @@ RUN set -x \
         --http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
         --user=nginx \
         --group=nginx \
-        --pid-path=/var/run/nginx.pid \
-        --lock-path=/var/run/nginx.lock \
+        --pid-path=/run/nginx.pid \
+        --lock-path=/run/nginx.lock \
         --with-compat \
         --with-pcre-jit \
         --with-http_ssl_module \
@@ -63,14 +67,13 @@ RUN set -x \
         --with-stream_ssl_module \
         --with-stream_sni \
         --with-stream_ssl_preread_module \
-        --with-stream_realip_module \
         --with-stream=dynamic \
         --add-module=./modules/ngx_tongsuo_ntls \
-        --with-openssl=$TEMP_HOME/Tongsuo-$TONGSUO_VERSION \
+        --with-openssl="$TEMP_HOME/Tongsuo-$TONGSUO_VERSION" \
         --with-openssl-opt="$tongsuo_opt" \
-    && make -j4 && make install \
-    && rm -rf $TEMP_HOME \
-    && apt-get remove --purge --auto-remove -y curl g++ gcc make lsb-release libpcre2-dev zlib1g-dev perl && apt-get autoclean \
+    && make -j"$(nproc)" && make install \
+    && rm -rf "$TEMP_HOME" \
+    && apt-get remove --purge --auto-remove -y curl g++ gcc make libpcre2-dev zlib1g-dev perl && apt-get autoclean \
     && rm -rf /var/lib/apt/lists/* \
     && echo "Container for $(uname -m) CPU architecture." > /opt/architecture \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
@@ -80,4 +83,4 @@ EXPOSE 80
 
 STOPSIGNAL SIGQUIT
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["/usr/sbin/nginx", "-g", "daemon off;"]
